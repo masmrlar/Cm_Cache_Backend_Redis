@@ -39,11 +39,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Backend_ExtendedInterface
 {
 
-    const SET_IDS         = 'zc:ids';
-    const SET_TAGS        = 'zc:tags';
+    const SET_IDS         = 'ids';
+    const SET_TAGS        = 'tags';
+    const SET_EXPIRED     = 'expired';
 
-    const PREFIX_KEY      = 'zc:k:';
-    const PREFIX_TAG_IDS  = 'zc:ti:';
+    const PREFIX_KEY      = 'k:';
+    const PREFIX_TAG_IDS  = 'ti:';
 
     const FIELD_DATA      = 'd';
     const FIELD_MTIME     = 'm';
@@ -368,15 +369,19 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
      */
     protected function _collectGarbage()
     {
+        // Store tag cleaning function
+        $delByUnion = $this->_redis->script('load', $this->luaDelBySetUnion());
+        $idsSet = $this->_notMatchingTags ? self::SET_IDS : 0;
+
         // Clean up expired keys from tag id set and global id set
         $exists = array();
         $tags = (array) $this->_redis->sMembers(self::SET_TAGS);
+        $expired = array();
         foreach($tags as $tag)
         {
             // Get list of expired ids for each tag
             $tagMembers = $this->_redis->sMembers(self::PREFIX_TAG_IDS . $tag);
             $numTagMembers = count($tagMembers);
-            $expired = array();
             $numExpired = $numNotExpired = 0;
             if($numTagMembers) {
                 while ($id = array_pop($tagMembers)) {
@@ -391,10 +396,11 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
                         $expired[] = $id;
 
                         // Remove incrementally to reduce memory usage
-                        if (count($expired) % 100 == 0 && $numNotExpired > 0) {
+                        if (count($expired) >= 100 && $numNotExpired > 0) {
+                            $this->_redis->sAdd(self::SET_EXPIRED, $expired);
                             $this->_redis->sRem( self::PREFIX_TAG_IDS . $tag, $expired);
-                            if($this->_notMatchingTags) { // Clean up expired ids from ids set
-                                $this->_redis->sRem( self::SET_IDS, $expired);
+                            if ($this->_redis->sCard(self::SET_EXPIRED) > 1000) {
+                                $this->_redis->evalSha($delByUnion, 2, $idsSet, self::SET_EXPIRED);
                             }
                             $expired = array();
                         }
@@ -747,6 +753,18 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
     public function ___expire($id)
     {
         $this->_redis->del(self::PREFIX_KEY.$id);
+    }
+
+    public function luaDelBySetUnion()
+    {
+      return "
+      local set = KEYS.remove(x,1);
+      local ids = redis.pcall('sunion', unpack(KEYS));
+      if set then
+          redis.pcall('srem', set, unpack(ids));
+      end
+      redis.pcall('del', unpack(ids));
+      ";
     }
 
 }
