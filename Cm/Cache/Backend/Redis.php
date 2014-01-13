@@ -101,7 +101,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         $port = isset($options['port']) ? $options['port'] : NULL;
         $timeout = isset($options['timeout']) ? $options['timeout'] : self::DEFAULT_CONNECT_TIMEOUT;
         $persistent = isset($options['persistent']) ? $options['persistent'] : '';
-        $credisclassname = isset($options['crediclassname']) ? $options['credisclassname'] : 'Credis_Client';
+        $credisclassname = isset($options['credisclassname']) ? $options['credisclassname'] : 'Credis_Client';
+        if (!class_exists($credisclassname)) {
+            $credisclassname = 'Credis_Client';
+        }
         $this->_redis = new $credisclassname($options['server'], $port, $timeout, $persistent);
 
         if ( isset($options['force_standalone']) && $options['force_standalone']) {
