@@ -10,37 +10,12 @@
         }
     ],
     "require":{
-        "magento-hackathon/magento-composer-installer":"*",
-        "colinmollenhour/credis_local_mapped": "*"
+        "colinmollenhour/credis": "dev-composer-compliant"
     },
     "repositories": [
         {
-            "type": "package",
-            "package": {
-                "name": "colinmollenhour/credis_local_mapped",
-                "type": "magento-library",
-                "version": "1.0",
-                "replace": {
-                    "colinmollenhour/credis": "*"
-                },
-                "require": {
-                    "composer/installers": "~1.0"
-                },
-                "source": {
-                    "url": "https://github.com/colinmollenhour/credis.git",
-                    "type": "git",
-                    "reference": "origin"
-                },
-                "extra": {
-                    "installer-name": "Credis",
-                    "installer-paths": {
-                        "htdocs/lib/{$name}": ["colinmollenhour/credis_local_mapped"]
-                    }
-                }
-            }
+            "type": "vcs",
+            "url": "https://github.com/AOEpeople/credis.git"
         }
-    ],
-    "extra": {
-        "magento-root-dir": "root"
-    }
+    ]
 }

@@ -1,1 +1,2 @@
 Cm/Cache/Backend/*                 app/code/community/Cm/Cache/Backend/
+lib/Credis                         lib/Credis
