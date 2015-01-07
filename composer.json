@@ -12,5 +12,28 @@
     "require":{
         "magento-hackathon/magento-composer-installer":"*",
         "colinmollenhour/credis": "*"
+    },
+    "repositories": [
+        {
+            "type": "package",
+            "package": {
+                "name": "colinmollenhour/credis",
+                "type": "magento-module",
+                "version": "*",
+                "source": {
+                    "url": "https://github.com/colinmollenhour/credis.git",
+                    "type": "git",
+                    "reference": "origin"
+                },
+                "extra": {
+                    "map": [
+                        ["*", "lib/Credis/"]
+                    ]
+                }
+            }
+        }
+    ],
+    "extra": {
+        "magento-root-dir": "root"
     }
 }
