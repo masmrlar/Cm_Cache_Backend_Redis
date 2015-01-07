@@ -56,7 +56,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
     const DEFAULT_CONNECT_RETRIES = 1;
 
     const LUA_SAVE_SH1 = '1617c9fb2bda7d790bb1aaa320c1099d81825e64';
-    const LUA_CLEAN_SH1 = '1dc59e493285befe678c480c8f10f1a7cc352c71';
+    const LUA_CLEAN_SH1 = '42ab2fe548aee5ff540123687a2c39a38b54e4a2';
     const LUA_GC_SH1 = 'c00416b970f1aa6363b44965d4cf60ee99a6f065';
 
     /** @var Credis_Client */
@@ -82,6 +82,16 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
 
     /** @var bool */
     protected $_useLua = false;
+
+    /**
+     * Lua's unpack() has a limit on the size of the table imposed by
+     * the number of Lua stack slots that a C function can use.
+     * This value is defined by LUAI_MAXCSTACK in luaconf.h and for Redis it is set to 8000.
+     *
+     * @see https://github.com/antirez/redis/blob/b903145/deps/lua/src/luaconf.h#L439
+     * @var int
+     */
+    protected $_luaMaxCStack = 5000;
 
     /**
      * Contruct Zend_Cache Redis backend
@@ -155,7 +165,7 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
         }
 
         if ( isset($options['compression_lib']) ) {
-            $this->_compressionLib = $options['compression_lib'];
+            $this->_compressionLib = (string) $options['compression_lib'];
         }
         else if ( function_exists('snappy_compress') ) {
             $this->_compressionLib = 'snappy';
@@ -173,6 +183,10 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
 
         if (isset($options['use_lua'])) {
             $this->_useLua = (bool) $options['use_lua'];
+        }
+
+        if (isset($options['lua_max_c_stack'])) {
+            $this->_luaMaxCStack = (int) $options['lua_max_c_stack'];
         }
     }
 
@@ -423,18 +437,20 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
     {
         if ($this->_useLua) {
             $pTags = $this->_preprocessTagIds($tags);
-            $sArgs = array(self::PREFIX_KEY, self::SET_TAGS, self::SET_IDS, ($this->_notMatchingTags ? 1 : 0));
+            $sArgs = array(self::PREFIX_KEY, self::SET_TAGS, self::SET_IDS, ($this->_notMatchingTags ? 1 : 0), (int) $this->_luaMaxCStack);
             if ( ! $this->_redis->evalSha(self::LUA_CLEAN_SH1, $pTags, $sArgs)) {
                 $script =
-                    "local keysToDel = redis.call('SUNION', unpack(KEYS)) ".
-                    "for _, keyname in ipairs(keysToDel) do ".
-                        "redis.call('DEL', ARGV[1]..keyname) ".
-                        "if (ARGV[4] == '1') then ".
-                            "redis.call('SREM', ARGV[3], keyname) ".
+                    "for i = 1, #KEYS, ARGV[5] do ".
+                        "local keysToDel = redis.call('SUNION', unpack(KEYS, i, math.min(#KEYS, i + ARGV[5] - 1))) ".
+                        "for _, keyname in ipairs(keysToDel) do ".
+                            "redis.call('DEL', ARGV[1]..keyname) ".
+                            "if (ARGV[4] == '1') then ".
+                                "redis.call('SREM', ARGV[3], keyname) ".
+                            "end ".
                         "end ".
+                        "redis.call('DEL', unpack(KEYS, i, math.min(#KEYS, i + ARGV[5] - 1))) ".
+                        "redis.call('SREM', ARGV[2], unpack(KEYS, i, math.min(#KEYS, i + ARGV[5] - 1))) ".
                     "end ".
-                    "redis.call('DEL', unpack(KEYS)) ".
-                    "redis.call('SREM', ARGV[2], unpack(KEYS)) ".
                     "return true";
                 $this->_redis->eval($script, $pTags, $sArgs);
             }
@@ -840,12 +856,13 @@ class Cm_Cache_Backend_Redis extends Zend_Cache_Backend implements Zend_Cache_Ba
      */
     protected function _encodeData($data, $level)
     {
-        if ($level && strlen($data) >= $this->_compressThreshold) {
+        if ($this->_compressionLib && $level && strlen($data) >= $this->_compressThreshold) {
             switch($this->_compressionLib) {
-              case 'snappy': $data = snappy_compress($data); break;
-              case 'lzf':    $data = lzf_compress($data); break;
-              case 'l4z':    $data = lz4_compress($data,($level > 1 ? true : false)); break;
-              case 'gzip':   $data = gzcompress($data, $level); break;
+                case 'snappy': $data = snappy_compress($data); break;
+                case 'lzf':    $data = lzf_compress($data); break;
+                case 'l4z':    $data = lz4_compress($data,($level > 1 ? true : false)); break;
+                case 'gzip':   $data = gzcompress($data, $level); break;
+                default:       throw new CredisException("Unrecognized 'compression_lib'.");
             }
             if( ! $data) {
                 throw new CredisException("Could not compress cache data.");

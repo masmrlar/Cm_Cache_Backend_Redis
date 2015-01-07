@@ -39,6 +39,8 @@ require_once 'CommonExtendedBackendTest.php';
  */
 class Zend_Cache_RedisBackendTest extends Zend_Cache_CommonExtendedBackendTest {
 
+    const LUA_MAX_C_STACK = 1000;
+
     protected $forceStandalone = FALSE;
 
     /** @var Cm_Cache_Backend_Redis */
@@ -60,6 +62,7 @@ class Zend_Cache_RedisBackendTest extends Zend_Cache_CommonExtendedBackendTest {
             'compress_threshold' => 100,
             'compression_lib' => 'gzip',
             'use_lua' => TRUE,
+            'lua_max_c_stack' => self::LUA_MAX_C_STACK,
         ));
         $this->_instance->clean(Zend_Cache::CLEANING_MODE_ALL);
         parent::setUp($notag);
@@ -93,7 +96,9 @@ class Zend_Cache_RedisBackendTest extends Zend_Cache_CommonExtendedBackendTest {
         $this->assertTrue($this->_instance->clean());
         $this->assertTrue($this->_instance->save('BLAH','foo', array('TAG1', 'TAG2'), 1));
         $this->assertTrue($this->_instance->save('BLAH','bar', array('TAG1', 'TAG3'), 1));
-        $this->assertEquals(array('foo','bar'), $this->_instance->getIdsMatchingAnyTags(array('TAG1','TAG2','TAG3')));
+        $ids = $this->_instance->getIdsMatchingAnyTags(array('TAG1','TAG2','TAG3'));
+        sort($ids);
+        $this->assertEquals(array('bar','foo'), $ids);
 
         // sleep(2);
         $this->_instance->___expire('foo');
@@ -169,6 +174,30 @@ class Zend_Cache_RedisBackendTest extends Zend_Cache_CommonExtendedBackendTest {
         $this->assertFalse(!!$this->_instance->load('bar'));
         $this->assertFalse(!!$this->_instance->load('bar2'));
         $this->assertTrue(!!$this->_instance->load('bar3'));
+    }
+
+    public function testCleanModeMatchingAnyTags5()
+    {
+        $tags = array('tag1', 'tag4');
+        for ($i = 0; $i < self::LUA_MAX_C_STACK*5; $i++) {
+            $this->_instance->save('foo', 'foo'.$i, $tags);
+        }
+        $this->assertGreaterThan(self::LUA_MAX_C_STACK, count($this->_instance->getIdsMatchingAnyTags($tags)));
+        $this->_instance->clean(Zend_Cache::CLEANING_MODE_MATCHING_ANY_TAG, $tags);
+        $this->assertEquals(0, count($this->_instance->getIdsMatchingAnyTags($tags)));
+    }
+
+    public function testCleanModeMatchingAnyTags6()
+    {
+        $tags = array();
+        for ($i = 0; $i < self::LUA_MAX_C_STACK*5; $i++) {
+            $tags[] = 'baz'.$i;
+        }
+        $this->_instance->save('foo', 'foo', $tags);
+        $_tags = array(end($tags));
+        $this->assertEquals(1, count($this->_instance->getIdsMatchingAnyTags($_tags)));
+        $this->_instance->clean(Zend_Cache::CLEANING_MODE_MATCHING_ANY_TAG, $_tags);
+        $this->assertEquals(0, count($this->_instance->getIdsMatchingAnyTags($_tags)));
     }
 
 }
